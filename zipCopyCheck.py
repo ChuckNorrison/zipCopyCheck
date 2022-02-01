@@ -6,6 +6,11 @@ from os.path import join
 from argparse import ArgumentParser
 import os
 
+import re
+import mmap
+import hashlib
+import shutil
+
 parser = ArgumentParser()
 
 parser.add_argument("-s", "--sourcedir", dest="sourcedirpath",
@@ -36,21 +41,51 @@ def run_fast_scandir(dir, ext):    # dir: str, ext: list
         subfolders.extend(sf)
         files.extend(f)
     return subfolders, files
- 
-if __name__ == '__main__':
-	if args.sourcedirpath:
-		sourceDir = os.path.abspath(args.sourcedirpath)
-		#targetDir = os.path.abspath(args.targetddirpath)
-		try:
-			if args.fileext:
-				fileext = args.fileext
-			else: 
-				fileext = "zip"
-				print("Default file extension is '" + fileext + "'")
 
-			subfolders, files = run_fast_scandir(sourceDir, [fileext])
-			print(files)
-		except:
-			print("Directory not found")
-	else:
-		print("Argument --sourcedir (-s) was missing.")
+if __name__ == '__main__':
+    if args.sourcedirpath:
+        sourceDir = os.path.abspath(args.sourcedirpath)
+        #targetDir = os.path.abspath(args.targetddirpath)
+        try:
+            # search all the files to copy
+            subfolders, files = run_fast_scandir(sourceDir, [args.fileext])
+            #print(files)
+            for f in files:
+                # open each file as memory mapped file object
+                with open(f, mode='rb') as fin:
+                    mf = mmap.mmap(fin.fileno(), 0, access=mmap.ACCESS_READ)
+                    m = hashlib.md5()
+                    #print(mf.read())
+                    m.update(mf)
+
+                    # output md5 hash for this file
+                    filehash = m.hexdigest()
+                    filename = os.path.basename(f)
+                    #print(filename + ": " + filehash)
+
+                    # copy file to destination
+                    if args.targetddirpath:
+                        if not os.path.exists(args.targetddirpath):
+                            os.mkdir(args.targetddirpath)
+                        fulltarget = os.path.join(args.targetddirpath, filename)
+                        shutil.copy(f, fulltarget)
+
+                        # verify md5 hash again
+                        with open(os.path.abspath(fulltarget), mode='rb') as fin2:
+                            mf2 = mmap.mmap(fin2.fileno(), 0, access=mmap.ACCESS_READ)
+                            m2 = hashlib.md5()
+                            m2.update(mf2)
+                            filehash2 = m2.hexdigest()
+                            print(filename + ": " + filehash + " <> " + filehash2)
+                            print(mf2)
+                            if filehash == filehash2:
+                                print("SUCCESS " + filename)
+                            else:
+                                print("FAILED " + filename)
+                    else: 
+                        print("target directory not set")
+
+        except Exception as e:
+            print(e)
+    else:
+        print("Argument --sourcedir (-s) was missing.")
