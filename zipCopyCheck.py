@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 """Simple Bot to find files recusrive by file extension, copy to a destination target and check integrity
 """
+import logging
 
 from os.path import join
 from argparse import ArgumentParser
@@ -24,6 +25,16 @@ parser.add_argument("-e", "--fileextension", dest="fileext",
 
 args = parser.parse_args()
 
+logger = logging.getLogger("zipCopyCheck")
+formatter = logging.Formatter("%(asctime)s.%(msecs)03d - %(name)s - %(message)s","%Y-%m-%d %H:%M:%S")
+handler = logging.StreamHandler()
+handler.setFormatter(formatter)
+logger.addHandler(handler)
+logger.setLevel(logging.INFO)
+
+errCnt = 0
+errFiles = []
+
 def run_fast_scandir(dir, ext):    # dir: str, ext: list
     # https://stackoverflow.com/a/59803793/2441026
 
@@ -43,49 +54,57 @@ def run_fast_scandir(dir, ext):    # dir: str, ext: list
     return subfolders, files
 
 if __name__ == '__main__':
+    logger.info("Start zipCopyCheck script")
+
     if args.sourcedirpath:
         sourceDir = os.path.abspath(args.sourcedirpath)
-        #targetDir = os.path.abspath(args.targetddirpath)
+        logger.info("Source: " + str(sourceDir))
+
+        if args.targetddirpath:
+            targetDir = os.path.abspath(args.targetddirpath)
+            logger.info("Destination: " + str(targetDir))
+        else:
+            logger.warning("target directory not set")
+
         try:
             # search all the files to copy
             subfolders, files = run_fast_scandir(sourceDir, [args.fileext])
-            #print(files)
             for f in files:
                 # open each file as memory mapped file object
                 with open(f, mode='rb') as fin:
                     mf = mmap.mmap(fin.fileno(), 0, access=mmap.ACCESS_READ)
                     m = hashlib.md5()
-                    #print(mf.read())
                     m.update(mf)
 
-                    # output md5 hash for this file
+                    # remember hash for this file
                     filehash = m.hexdigest()
                     filename = os.path.basename(f)
-                    #print(filename + ": " + filehash)
 
                     # copy file to destination
-                    if args.targetddirpath:
-                        if not os.path.exists(args.targetddirpath):
-                            os.mkdir(args.targetddirpath)
-                        fulltarget = os.path.join(args.targetddirpath, filename)
-                        shutil.copy(f, fulltarget)
+                    if not os.path.exists(targetDir):
+                        os.mkdir(targetDir)
+                    targetPath = os.path.join(targetDir, filename)
+                    shutil.copy(f, targetPath)
 
-                        # verify md5 hash again
-                        with open(os.path.abspath(fulltarget), mode='rb') as fin2:
-                            mf2 = mmap.mmap(fin2.fileno(), 0, access=mmap.ACCESS_READ)
-                            m2 = hashlib.md5()
-                            m2.update(mf2)
-                            filehash2 = m2.hexdigest()
-                            print(filename + ": " + filehash + " <> " + filehash2)
-                            print(mf2)
-                            if filehash == filehash2:
-                                print("SUCCESS " + filename)
-                            else:
-                                print("FAILED " + filename)
-                    else: 
-                        print("target directory not set")
+                    # verify md5 hash again
+                    with open(os.path.abspath(targetPath), mode='rb') as fin2:
+                        mf2 = mmap.mmap(fin2.fileno(), 0, access=mmap.ACCESS_READ)
+                        m2 = hashlib.md5()
+                        m2.update(mf2)
+                        filehash2 = m2.hexdigest()
+                        logger.debug(filename + ": " + filehash + " <> " + filehash2)
+                        if filehash == filehash2:
+                            logger.info("SUCCESS " + filename)
+                        else:
+                            errCnt+=1
+                            errFiles.append(targetPath)
+                            logger.critical("FAILED " + filename)
 
         except Exception as e:
-            print(e)
+            logger.critical(e)
+        if errCnt != 0:
+            logger.critical("Some errors occured:")
+            for f in errFiles:
+                logger.critical(str(f))
     else:
-        print("Argument --sourcedir (-s) was missing.")
+        logger.warning("Argument --sourcedir (-s) was missing. Nothing to do.")
